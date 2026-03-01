@@ -397,4 +397,6 @@ def load_dataset(
         return load_acm3025(data_root=data_root)
     if ds in ["amazon_electronics_photo", "amazon-photo", "amazon_photo", "amazon_photo_npz"]:
         return load_npz_graph(data_root=data_root, filename="amazon_electronics_photo.npz")
+    if ds in ["amazon_electronics_computers", "amazon-computers", "amazon_computers", "amazon_computers_npz"]:
+        return load_npz_graph(data_root=data_root, filename="amazon_electronics_computers.npz")
     raise ValueError(f"Unsupported dataset: {dataset}")

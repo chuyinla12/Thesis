@@ -17,7 +17,7 @@ from loss import sample_level_loss, sample_level_loss_v1, cluster_level_loss, Cl
 def build_args():
     p = argparse.ArgumentParser()
     # ---------------- 数据集与路径配置 ----------------
-    p.add_argument("--dataset", type=str, default="cora", help="数据集名称 (cora, citeseer, pubmed, acm, amazon_electronics_photo)")
+    p.add_argument("--dataset", type=str, default="cora", help="数据集名称 (cora, citeseer, pubmed, acm, amazon_electronics_photo, amazon_electronics_computers)")
     p.add_argument("--data_root", type=str, default=r"../data", help="原始数据存放根目录")
     p.add_argument("--extracted_root", type=str, default=None, help="解压/预处理后的数据目录，默认在 data_extracted 下")
     p.add_argument("--save_dir", type=str, default=None, help="模型保存和日志输出目录")
@@ -40,7 +40,7 @@ def build_args():
     p.add_argument("--eval_mode", type=str, default="Kmeans", help="评估模式: 'Kmeans' (对embedding做聚类) 或 'Argmax' (直接取cluster head最大值)")
     p.add_argument("--eval_embed", type=str, default="h_all", help="用于评估的embedding: 'h_all'(融合), 'h0'(视图0), 'h1'(视图1), 'concat'(拼接)")
     p.add_argument("--kmeans_n_init", type=int, default=20, help="KMeans评估时的n_init参数")
-    p.add_argument("--init_kmeans", type=int, default=0, help="是否在训练前用KMeans初始化聚类中心 (1:是, 0:否)")
+    p.add_argument("--init_kmeans", type=int, default=1, help="是否在训练前用KMeans初始化聚类中心 (1:是, 0:否)")
     
     # ---------------- 伪标签与自监督策略 ----------------
     p.add_argument("--pseudo_interval", type=int, default=10, help="每隔多少轮更新一次伪标签")
@@ -60,8 +60,8 @@ def build_args():
     p.add_argument("--debug_hist_k", type=int, default=7, help="调试时打印Top-K分布的K值")
 
     # ---------------- 视图1: GCA增强参数 ----------------
-    p.add_argument("--gca_drop_edge_p", type=float, default=0.2, help="GCA视图: 删边概率")
-    p.add_argument("--gca_drop_feat_p", type=float, default=0.5, help="GCA视图: 特征掩码概率")
+    p.add_argument("--gca_drop_edge_p", type=float, default=0.1, help="GCA视图: 删边概率")
+    p.add_argument("--gca_drop_feat_p", type=float, default=0.6, help="GCA视图: 特征掩码概率")
 
     # ---------------- 视图2: KNN与剪枝参数 ----------------
     p.add_argument("--knn_k", type=int, default=20, help="KNN构图的邻居数 K")
