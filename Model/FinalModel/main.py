@@ -17,7 +17,7 @@ from loss import sample_level_loss, sample_level_loss_v1, cluster_level_loss, Cl
 def build_args():
     p = argparse.ArgumentParser()
     # ---------------- 数据集与路径配置 ----------------
-    p.add_argument("--dataset", type=str, default="cora", help="数据集名称 (cora, citeseer, pubmed, acm)")
+    p.add_argument("--dataset", type=str, default="cora", help="数据集名称 (cora, citeseer, pubmed, acm, amazon_electronics_photo)")
     p.add_argument("--data_root", type=str, default=r"../data", help="原始数据存放根目录")
     p.add_argument("--extracted_root", type=str, default=None, help="解压/预处理后的数据目录，默认在 data_extracted 下")
     p.add_argument("--save_dir", type=str, default=None, help="模型保存和日志输出目录")
@@ -25,11 +25,11 @@ def build_args():
     # ---------------- 训练环境与随机种子 ----------------
     p.add_argument("--seed", type=int, default=1, help="随机种子，用于复现结果")
     p.add_argument("--cuda", type=int, default=1, help="是否使用GPU (1:是, 0:否)")
-    p.add_argument("--max_cuda_nodes", type=int, default=8000, help="GPU显存限制下的最大节点数，超过此数将强制使用CPU")
+    p.add_argument("--max_cuda_nodes", type=int, default=10000, help="GPU显存限制下的最大节点数，超过此数将强制使用CPU")
 
     # ---------------- 训练超参数 ----------------
     p.add_argument("--epochs", type=int, default=400, help="最大训练轮数")
-    p.add_argument("--lr", type=float, default=0.0005, help="学习率")
+    p.add_argument("--lr", type=float, default=0.001, help="学习率")
     p.add_argument("--weight_decay", type=float, default=0.001, help="优化器的权重衰减 (L2正则)")
     p.add_argument("--grad_clip", type=float, default=5.0, help="梯度裁剪阈值 (<=0表示关闭)")
     p.add_argument("--eval_interval", type=int, default=10, help="每隔多少轮进行一次评估 (NMI/ACC)")
@@ -58,14 +58,14 @@ def build_args():
 
     # ---------------- 视图1: GCA增强参数 ----------------
     p.add_argument("--gca_drop_edge_p", type=float, default=0, help="GCA视图: 删边概率")
-    p.add_argument("--gca_drop_feat_p", type=float, default=0.3, help="GCA视图: 特征掩码概率")
+    p.add_argument("--gca_drop_feat_p", type=float, default=0.2, help="GCA视图: 特征掩码概率")
 
     # ---------------- 视图2: KNN与剪枝参数 ----------------
     p.add_argument("--knn_k", type=int, default=20, help="KNN构图的邻居数 K")
     p.add_argument("--knn_metric", type=str, default="cosine", help="KNN距离度量 (目前仅支持 cosine)")
-    p.add_argument("--p_low_deg", type=float, default=0.04, help="低度边剪枝比例 (去除噪声边)")
+    p.add_argument("--p_low_deg", type=float, default=0.2, help="低度边剪枝比例 (去除噪声边)")
     p.add_argument("--low_deg_score", type=str, default="avg", help="低度边评分方式: 'min', 'avg', 'sum'")
-    p.add_argument("--p_high_ebc", type=float, default=0.2, help="高介数边剪枝比例 (强化社区结构)")
+    p.add_argument("--p_high_ebc", type=float, default=0.4, help="高介数边剪枝比例 (强化社区结构)")
     p.add_argument("--ebc_approx_k", type=int, default=256, help="计算介数中心性时的近似节点采样数")
 
     # ---------------- 模型架构参数 ----------------

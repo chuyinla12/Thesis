@@ -217,6 +217,55 @@ def load_acm3025(data_root: str):
     return labels, adj, features, adj_label, feature_label
 
 
+def load_npz_graph(data_root: str, filename: str):
+    npz_path = filename
+    if os.path.isdir(data_root):
+        found = _find_file_recursive(data_root, filename.lower())
+        if found is None:
+            found = _find_file_recursive(data_root, filename)
+        if found is None:
+            raise FileNotFoundError(f"{filename} not found under {data_root}")
+        npz_path = found
+    if not os.path.exists(npz_path):
+        raise FileNotFoundError(f"{filename} not found: {npz_path}")
+
+    with np.load(npz_path, allow_pickle=True) as data:
+        adj = sp.csr_matrix(
+            (data["adj_data"], data["adj_indices"], data["adj_indptr"]),
+            shape=tuple(data["adj_shape"]),
+            dtype=np.float32,
+        )
+        features_unorm = sp.csr_matrix(
+            (data["attr_data"], data["attr_indices"], data["attr_indptr"]),
+            shape=tuple(data["attr_shape"]),
+            dtype=np.float32,
+        )
+        labels_np = np.asarray(data["labels"]).reshape(-1).astype(np.int64)
+
+    if adj.shape[0] != adj.shape[1]:
+        raise ValueError(f"adj must be square, got {adj.shape}")
+    if adj.shape[0] != labels_np.shape[0]:
+        raise ValueError(f"labels length mismatch: N={adj.shape[0]} vs labels={labels_np.shape[0]}")
+    if features_unorm.shape[0] != labels_np.shape[0]:
+        raise ValueError(f"features rows mismatch: N={labels_np.shape[0]} vs X={features_unorm.shape[0]}")
+
+    adj_noeye = adj.tocsr()
+    adj_noeye.setdiag(0)
+    adj_noeye.eliminate_zeros()
+    adj_noeye = adj_noeye + adj_noeye.T.multiply(adj_noeye.T > adj_noeye) - adj_noeye.multiply(adj_noeye.T > adj_noeye)
+
+    adj_norm = adj_noeye + sp.eye(adj_noeye.shape[0], dtype=np.float32, format="csr")
+    adj_norm = normalize_spadj(adj_norm)
+    features = normalize_spfeatures(features_unorm)
+
+    labels = torch.LongTensor(labels_np)
+    features = torch.FloatTensor(np.array(features.todense()))
+    feature_label = torch.FloatTensor(np.array(features_unorm.todense()))
+    adj = torch.FloatTensor(np.array(adj_norm.todense()))
+    adj_label = torch.FloatTensor(np.array(adj_noeye.todense()) != 0)
+    return labels, adj, features, adj_label, feature_label
+
+
 def load_dataset(dataset: str, data_root: str, extracted_root: str):
     ds = dataset.lower()
     if ds in ["cora", "citeseer"]:
@@ -225,4 +274,6 @@ def load_dataset(dataset: str, data_root: str, extracted_root: str):
         return load_pubmed_raw(data_root=data_root, extracted_root=extracted_root)
     if ds in ["acm", "acm3025"]:
         return load_acm3025(data_root=data_root)
+    if ds in ["amazon_electronics_photo", "amazon-photo", "amazon_photo", "amazon_photo_npz"]:
+        return load_npz_graph(data_root=data_root, filename="amazon_electronics_photo.npz")
     raise ValueError(f"Unsupported dataset: {dataset}")
