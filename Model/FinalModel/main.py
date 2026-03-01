@@ -23,13 +23,16 @@ def build_args():
     p.add_argument("--save_dir", type=str, default=None, help="模型保存和日志输出目录")
     
     # ---------------- 训练环境与随机种子 ----------------
-    p.add_argument("--seed", type=int, default=1, help="随机种子，用于复现结果")
+    p.add_argument("--seed", type=int, default=4, help="随机种子，用于复现结果")
     p.add_argument("--cuda", type=int, default=1, help="是否使用GPU (1:是, 0:否)")
     p.add_argument("--max_cuda_nodes", type=int, default=10000, help="GPU显存限制下的最大节点数，超过此数将强制使用CPU")
+    p.add_argument("--pubmed_use_small", type=int, default=1, help="Pubmed是否使用抽样子图进行训练/评估 (1:是, 0:否)")
+    p.add_argument("--pubmed_small_n", type=int, default=8000, help="Pubmed抽样节点数 (按真实标签比例分层抽样)")
+    p.add_argument("--pubmed_small_rebuild", type=int, default=1, help="是否强制重新生成 pubmed-small (1:是, 0:否)")
 
     # ---------------- 训练超参数 ----------------
     p.add_argument("--epochs", type=int, default=400, help="最大训练轮数")
-    p.add_argument("--lr", type=float, default=0.001, help="学习率")
+    p.add_argument("--lr", type=float, default=0.0005, help="学习率")
     p.add_argument("--weight_decay", type=float, default=0.001, help="优化器的权重衰减 (L2正则)")
     p.add_argument("--grad_clip", type=float, default=5.0, help="梯度裁剪阈值 (<=0表示关闭)")
     p.add_argument("--eval_interval", type=int, default=10, help="每隔多少轮进行一次评估 (NMI/ACC)")
@@ -57,15 +60,15 @@ def build_args():
     p.add_argument("--debug_hist_k", type=int, default=7, help="调试时打印Top-K分布的K值")
 
     # ---------------- 视图1: GCA增强参数 ----------------
-    p.add_argument("--gca_drop_edge_p", type=float, default=0, help="GCA视图: 删边概率")
-    p.add_argument("--gca_drop_feat_p", type=float, default=0.2, help="GCA视图: 特征掩码概率")
+    p.add_argument("--gca_drop_edge_p", type=float, default=0.2, help="GCA视图: 删边概率")
+    p.add_argument("--gca_drop_feat_p", type=float, default=0.5, help="GCA视图: 特征掩码概率")
 
     # ---------------- 视图2: KNN与剪枝参数 ----------------
     p.add_argument("--knn_k", type=int, default=20, help="KNN构图的邻居数 K")
     p.add_argument("--knn_metric", type=str, default="cosine", help="KNN距离度量 (目前仅支持 cosine)")
     p.add_argument("--p_low_deg", type=float, default=0.2, help="低度边剪枝比例 (去除噪声边)")
     p.add_argument("--low_deg_score", type=str, default="avg", help="低度边评分方式: 'min', 'avg', 'sum'")
-    p.add_argument("--p_high_ebc", type=float, default=0.4, help="高介数边剪枝比例 (强化社区结构)")
+    p.add_argument("--p_high_ebc", type=float, default=0.3, help="高介数边剪枝比例 (强化社区结构)")
     p.add_argument("--ebc_approx_k", type=int, default=256, help="计算介数中心性时的近似节点采样数")
 
     # ---------------- 模型架构参数 ----------------
@@ -245,7 +248,15 @@ def main():
     ensure_dir(extracted_root)
     ensure_dir(save_dir)
 
-    labels, adj, features, adj_label, feature_label = load_dataset(args.dataset, args.data_root, extracted_root)
+    labels, adj, features, adj_label, feature_label = load_dataset(
+        args.dataset,
+        args.data_root,
+        extracted_root,
+        seed=int(args.seed),
+        pubmed_small_n=int(args.pubmed_small_n),
+        pubmed_small_rebuild=bool(args.pubmed_small_rebuild),
+        pubmed_use_small=bool(args.pubmed_use_small),
+    )
     N0 = int(features.size(0))
     device = get_device(bool(args.cuda))
     if device.type == "cuda" and N0 > int(args.max_cuda_nodes):

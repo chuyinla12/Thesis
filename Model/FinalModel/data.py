@@ -80,6 +80,21 @@ def load_citation_raw(dataset: str, data_root: str, extracted_root: str):
 
 
 def load_pubmed_raw(data_root: str, extracted_root: str):
+    labels_np, X_unorm, adj_noeye = _load_pubmed_sparse(data_root=data_root, extracted_root=extracted_root)
+    X = normalize_spfeatures(X_unorm)
+    N = int(labels_np.shape[0])
+    adj_norm = adj_noeye + sp.eye(N, dtype=np.float32, format="csr")
+    adj_norm = normalize_spadj(adj_norm)
+
+    labels = torch.LongTensor(labels_np)
+    features = torch.FloatTensor(np.array(X.todense()))
+    feature_label = torch.FloatTensor(np.array(X_unorm.todense()))
+    adj = torch.FloatTensor(np.array(adj_norm.todense()))
+    adj_label = torch.FloatTensor(np.array(adj_noeye.todense()) != 0)
+    return labels, adj, features, adj_label, feature_label
+
+
+def _load_pubmed_sparse(data_root: str, extracted_root: str):
     base = _maybe_extract_raw("pubmed", data_root, extracted_root, "pubmed-diabetes.node.paper.tab")
     node_file = _find_file_recursive(base, "Pubmed-Diabetes.NODE.paper.tab")
     cites_file = _find_file_recursive(base, "Pubmed-Diabetes.DIRECTED.cites.tab")
@@ -128,8 +143,11 @@ def load_pubmed_raw(data_root: str, extracted_root: str):
 
     N = len(ids)
     Fdim = len(feat_map)
-    X_unorm = sp.csr_matrix((np.asarray(vals, dtype=np.float32), (np.asarray(rows, dtype=np.int64), np.asarray(cols, dtype=np.int64))), shape=(N, Fdim), dtype=np.float32)
-    X = normalize_spfeatures(X_unorm)
+    X_unorm = sp.csr_matrix(
+        (np.asarray(vals, dtype=np.float32), (np.asarray(rows, dtype=np.int64), np.asarray(cols, dtype=np.int64))),
+        shape=(N, Fdim),
+        dtype=np.float32,
+    )
 
     idx_map = {pid: i for i, pid in enumerate(ids)}
     edge_u = []
@@ -149,20 +167,104 @@ def load_pubmed_raw(data_root: str, extracted_root: str):
                 edge_u.append(idx_map[u])
                 edge_v.append(idx_map[v])
     edges = np.vstack([edge_u, edge_v]).T.astype(np.int64) if len(edge_u) else np.zeros((0, 2), dtype=np.int64)
-    adj = sp.coo_matrix((np.ones(edges.shape[0], dtype=np.float32), (edges[:, 0], edges[:, 1])), shape=(N, N), dtype=np.float32)
+    adj = sp.coo_matrix(
+        (np.ones(edges.shape[0], dtype=np.float32), (edges[:, 0], edges[:, 1])),
+        shape=(N, N),
+        dtype=np.float32,
+    )
     adj = adj + adj.T.multiply(adj.T > adj) - adj.multiply(adj.T > adj)
     adj_noeye = adj.tocsr()
     adj_noeye.setdiag(0)
     adj_noeye.eliminate_zeros()
-    adj_norm = adj_noeye + sp.eye(N, dtype=np.float32, format="csr")
-    adj_norm = normalize_spadj(adj_norm)
+    return np.asarray(labels, dtype=np.int64), X_unorm, adj_noeye
 
-    labels = torch.LongTensor(np.asarray(labels, dtype=np.int64))
-    features = torch.FloatTensor(np.array(X.todense()))
-    feature_label = torch.FloatTensor(np.array(X_unorm.todense()))
-    adj = torch.FloatTensor(np.array(adj_norm.todense()))
-    adj_label = torch.FloatTensor(np.array(adj_noeye.todense()) != 0)
-    return labels, adj, features, adj_label, feature_label
+
+def _stratified_sample_indices(labels_np: np.ndarray, n: int, seed: int):
+    labels_np = np.asarray(labels_np, dtype=np.int64).reshape(-1)
+    N = int(labels_np.shape[0])
+    if n >= N:
+        return np.arange(N, dtype=np.int64)
+    if n <= 0:
+        raise ValueError(f"n must be positive, got {n}")
+
+    C = int(labels_np.max()) + 1 if N else 0
+    counts = np.bincount(labels_np, minlength=C).astype(np.int64)
+    probs = counts / max(1, N)
+    ideal = probs * float(n)
+    base = np.floor(ideal).astype(np.int64)
+    base = np.minimum(base, counts)
+
+    need = int(n - int(base.sum()))
+    if need > 0:
+        frac = ideal - base
+        order = np.argsort(-frac)
+        for c in order:
+            if need <= 0:
+                break
+            if base[c] < counts[c]:
+                base[c] += 1
+                need -= 1
+
+    cur = int(base.sum())
+    if cur < n:
+        for c in np.argsort(-counts):
+            if cur >= n:
+                break
+            add = min(int(counts[c] - base[c]), int(n - cur))
+            if add > 0:
+                base[c] += add
+                cur += add
+
+    rng = np.random.RandomState(int(seed))
+    out = []
+    for c in range(C):
+        k = int(base[c])
+        if k <= 0:
+            continue
+        idx_c = np.where(labels_np == c)[0]
+        if k >= idx_c.size:
+            out.append(idx_c.astype(np.int64))
+        else:
+            out.append(rng.choice(idx_c, size=k, replace=False).astype(np.int64))
+    if not out:
+        return np.arange(min(n, N), dtype=np.int64)
+    idx = np.concatenate(out, axis=0)
+    if idx.size > n:
+        idx = rng.choice(idx, size=n, replace=False).astype(np.int64)
+    idx = np.unique(idx)
+    if idx.size < n:
+        remain = np.setdiff1d(np.arange(N, dtype=np.int64), idx, assume_unique=False)
+        extra = rng.choice(remain, size=(n - idx.size), replace=False).astype(np.int64)
+        idx = np.concatenate([idx, extra], axis=0)
+    return np.sort(idx.astype(np.int64))
+
+
+def build_pubmed_small(data_root: str, extracted_root: str, n: int, seed: int, rebuild: bool = False):
+    out_dir = os.path.join(extracted_root, "pubmed-small")
+    ensure_dir(out_dir)
+    out_path = os.path.join(out_dir, "pubmed-small.npz")
+    if (not rebuild) and os.path.exists(out_path):
+        return out_path
+
+    labels_np, X_unorm, adj_noeye = _load_pubmed_sparse(data_root=data_root, extracted_root=extracted_root)
+    idx = _stratified_sample_indices(labels_np, n=int(n), seed=int(seed))
+    X_sub = X_unorm[idx]
+    A_sub = adj_noeye[idx][:, idx].tocsr()
+    y_sub = labels_np[idx]
+
+    np.savez_compressed(
+        out_path,
+        adj_data=A_sub.data.astype(np.float32),
+        adj_indices=A_sub.indices.astype(np.int32),
+        adj_indptr=A_sub.indptr.astype(np.int32),
+        adj_shape=np.asarray(A_sub.shape, dtype=np.int64),
+        attr_data=X_sub.data.astype(np.float32),
+        attr_indices=X_sub.indices.astype(np.int32),
+        attr_indptr=X_sub.indptr.astype(np.int32),
+        attr_shape=np.asarray(X_sub.shape, dtype=np.int64),
+        labels=y_sub.astype(np.int64),
+    )
+    return out_path
 
 
 def _find_file_recursive(root, filename_lower):
@@ -266,12 +368,31 @@ def load_npz_graph(data_root: str, filename: str):
     return labels, adj, features, adj_label, feature_label
 
 
-def load_dataset(dataset: str, data_root: str, extracted_root: str):
+def load_dataset(
+    dataset: str,
+    data_root: str,
+    extracted_root: str,
+    seed: int = 1,
+    pubmed_small_n: int = 8000,
+    pubmed_small_rebuild: bool = False,
+    pubmed_use_small: bool = False,
+):
     ds = dataset.lower()
     if ds in ["cora", "citeseer"]:
         return load_citation_raw(ds, data_root=data_root, extracted_root=extracted_root)
     if ds == "pubmed":
+        if pubmed_use_small:
+            build_pubmed_small(
+                data_root=data_root,
+                extracted_root=extracted_root,
+                n=int(pubmed_small_n),
+                seed=int(seed),
+                rebuild=bool(pubmed_small_rebuild),
+            )
+            return load_npz_graph(data_root=extracted_root, filename="pubmed-small.npz")
         return load_pubmed_raw(data_root=data_root, extracted_root=extracted_root)
+    if ds in ["pubmed-small", "pubmed_small"]:
+        return load_npz_graph(data_root=extracted_root, filename="pubmed-small.npz")
     if ds in ["acm", "acm3025"]:
         return load_acm3025(data_root=data_root)
     if ds in ["amazon_electronics_photo", "amazon-photo", "amazon_photo", "amazon_photo_npz"]:
