@@ -267,6 +267,82 @@ def build_pubmed_small(data_root: str, extracted_root: str, n: int, seed: int, r
     return out_path
 
 
+def _load_npz_sparse(data_root: str, filename: str):
+    npz_path = filename
+    if os.path.isdir(data_root):
+        found = _find_file_recursive(data_root, filename.lower())
+        if found is None:
+            found = _find_file_recursive(data_root, filename)
+        if found is None:
+            raise FileNotFoundError(f"{filename} not found under {data_root}")
+        npz_path = found
+    if not os.path.exists(npz_path):
+        raise FileNotFoundError(f"{filename} not found: {npz_path}")
+
+    with np.load(npz_path, allow_pickle=True) as data:
+        adj = sp.csr_matrix(
+            (data["adj_data"], data["adj_indices"], data["adj_indptr"]),
+            shape=tuple(data["adj_shape"]),
+            dtype=np.float32,
+        )
+        features_unorm = sp.csr_matrix(
+            (data["attr_data"], data["attr_indices"], data["attr_indptr"]),
+            shape=tuple(data["attr_shape"]),
+            dtype=np.float32,
+        )
+        labels_np = np.asarray(data["labels"]).reshape(-1).astype(np.int64)
+
+    if adj.shape[0] != adj.shape[1]:
+        raise ValueError(f"adj must be square, got {adj.shape}")
+    if adj.shape[0] != labels_np.shape[0]:
+        raise ValueError(f"labels length mismatch: N={adj.shape[0]} vs labels={labels_np.shape[0]}")
+    if features_unorm.shape[0] != labels_np.shape[0]:
+        raise ValueError(f"features rows mismatch: N={labels_np.shape[0]} vs X={features_unorm.shape[0]}")
+
+    adj_noeye = adj.tocsr()
+    adj_noeye.setdiag(0)
+    adj_noeye.eliminate_zeros()
+    adj_noeye = adj_noeye + adj_noeye.T.multiply(adj_noeye.T > adj_noeye) - adj_noeye.multiply(adj_noeye.T > adj_noeye)
+    return labels_np, features_unorm, adj_noeye
+
+
+def build_npz_small(
+    data_root: str,
+    extracted_root: str,
+    src_filename: str,
+    out_dirname: str,
+    out_filename: str,
+    n: int,
+    seed: int,
+    rebuild: bool = False,
+):
+    out_dir = os.path.join(extracted_root, str(out_dirname))
+    ensure_dir(out_dir)
+    out_path = os.path.join(out_dir, str(out_filename))
+    if (not rebuild) and os.path.exists(out_path):
+        return out_path
+
+    labels_np, X_unorm, adj_noeye = _load_npz_sparse(data_root=data_root, filename=src_filename)
+    idx = _stratified_sample_indices(labels_np, n=int(n), seed=int(seed))
+    X_sub = X_unorm[idx]
+    A_sub = adj_noeye[idx][:, idx].tocsr()
+    y_sub = labels_np[idx]
+
+    np.savez_compressed(
+        out_path,
+        adj_data=A_sub.data.astype(np.float32),
+        adj_indices=A_sub.indices.astype(np.int32),
+        adj_indptr=A_sub.indptr.astype(np.int32),
+        adj_shape=np.asarray(A_sub.shape, dtype=np.int64),
+        attr_data=X_sub.data.astype(np.float32),
+        attr_indices=X_sub.indices.astype(np.int32),
+        attr_indptr=X_sub.indptr.astype(np.int32),
+        attr_shape=np.asarray(X_sub.shape, dtype=np.int64),
+        labels=y_sub.astype(np.int64),
+    )
+    return out_path
+
+
 def _find_file_recursive(root, filename_lower):
     filename_lower = str(filename_lower).lower()
     for r, _, files in os.walk(root):
@@ -376,6 +452,9 @@ def load_dataset(
     pubmed_small_n: int = 8000,
     pubmed_small_rebuild: bool = False,
     pubmed_use_small: bool = False,
+    amazon_computers_small_n: int = 8000,
+    amazon_computers_small_rebuild: bool = False,
+    amazon_computers_use_small: bool = False,
 ):
     ds = dataset.lower()
     if ds in ["cora", "citeseer"]:
@@ -398,5 +477,25 @@ def load_dataset(
     if ds in ["amazon_electronics_photo", "amazon-photo", "amazon_photo", "amazon_photo_npz"]:
         return load_npz_graph(data_root=data_root, filename="amazon_electronics_photo.npz")
     if ds in ["amazon_electronics_computers", "amazon-computers", "amazon_computers", "amazon_computers_npz"]:
+        if amazon_computers_use_small:
+            build_npz_small(
+                data_root=data_root,
+                extracted_root=extracted_root,
+                src_filename="amazon_electronics_computers.npz",
+                out_dirname="amazon_electronics_computers-small",
+                out_filename="amazon_electronics_computers-small.npz",
+                n=int(amazon_computers_small_n),
+                seed=int(seed),
+                rebuild=bool(amazon_computers_small_rebuild),
+            )
+            return load_npz_graph(data_root=extracted_root, filename="amazon_electronics_computers-small.npz")
         return load_npz_graph(data_root=data_root, filename="amazon_electronics_computers.npz")
+    if ds in [
+        "amazon_electronics_computers-small",
+        "amazon_electronics_computers_small",
+        "amazon-computers-small",
+        "amazon_computers-small",
+        "amazon_computers_small",
+    ]:
+        return load_npz_graph(data_root=extracted_root, filename="amazon_electronics_computers-small.npz")
     raise ValueError(f"Unsupported dataset: {dataset}")
