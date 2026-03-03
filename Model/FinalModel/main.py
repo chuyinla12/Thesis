@@ -32,7 +32,7 @@ DATASET_DEFAULTS = {
         "amazon_computers_use_small": 1,
         "amazon_computers_small_n": 8000,
         "amazon_computers_small_rebuild": 1,
-        "epochs": 1000,
+        "epochs": 500,
         "lr": 0.0005,
         "weight_decay": 0.001,
         "grad_clip": 5.0,
@@ -51,7 +51,7 @@ DATASET_DEFAULTS = {
         "weights_momentum": 0.9,
         "weights_min": 0.05,
         "pseudo_warm_start": 0,
-        "early_stop_patience": 10,
+        "early_stop_patience": 0,
         "debug": 0,
         "debug_interval": 1,
         "debug_hist_k": 7,
@@ -71,7 +71,7 @@ DATASET_DEFAULTS = {
         "gcn_impl": "pyg",
         "alpha": 0.0,
         "beda": 0.0,
-        "gama": 0.0,
+        "gama": 1.0,
         "w_sample": 1.0,
         "sample_loss_impl": "v2",
         "sample_loss_space": "embed",
@@ -94,8 +94,8 @@ DATASET_DEFAULTS = {
         "use_a_pos_weight": 0,
         "kl_max": 1.0,
         "kl_anneal_epochs": 100,
-        "loss_warmup_start": 0,
-        "loss_warmup_epochs": 100,
+        "loss_warmup_start": 100,
+        "loss_warmup_epochs": 50,
         "w_re_x": 0.0,
         "w_re_x_mse": 0.0,
         "w_re_a": 0.0,
@@ -439,13 +439,13 @@ DATASET_DEFAULTS = {
         "max_cuda_nodes": 10000,
         "pubmed_use_small": 1,
         "pubmed_small_n": 8000,
-        "pubmed_small_rebuild": 0,
+        "pubmed_small_rebuild": 1,
         "amazon_computers_use_small": 1,
         "amazon_computers_small_n": 8000,
         "amazon_computers_small_rebuild": 1,
-        "epochs": 100,
+        "epochs": 400,
         "lr": 0.001,
-        "weight_decay": 0.001,
+        "weight_decay": 0.002,
         "grad_clip": 5.0,
         "eval_interval": 10,
         "print_interval": 10,
@@ -481,10 +481,10 @@ DATASET_DEFAULTS = {
         "gcn_layers": 2,
         "gcn_impl": "pyg",
         "alpha": 0.0,
-        "beda": 0.0,
-        "gama": 0.0,
-        "w_sample": 0.1,
-        "sample_loss_impl": "v1",
+        "beda": 1.0,
+        "gama": 1.0,
+        "w_sample": 1,
+        "sample_loss_impl": "v2",
         "sample_loss_space": "embed",
         "w_cluster": 1.0,
         "w_clusterloss": 1.2,
@@ -505,8 +505,8 @@ DATASET_DEFAULTS = {
         "use_a_pos_weight": 0,
         "kl_max": 1.0,
         "kl_anneal_epochs": 100,
-        "loss_warmup_start": 0,
-        "loss_warmup_epochs": 0,
+        "loss_warmup_start": 50,
+        "loss_warmup_epochs":20,
         "w_re_x": 0.0,
         "w_re_x_mse": 0.0,
         "w_re_a": 0.0,
@@ -640,8 +640,8 @@ def build_args():
     p.add_argument("--use_a_pos_weight", type=int, default=0, help="结构重构BCE是否使用正样本加权 (解决稀疏性)")
     p.add_argument("--kl_max", type=float, default=1.0, help="Student-t KL损失的最大权重 (用于Annealing)")
     p.add_argument("--kl_anneal_epochs", type=int, default=100, help="Student-t KL损失权重的退火周期 (线性增长)")
-    p.add_argument("--loss_warmup_start", type=int, default=0, help="match/sim/kl-soft/swav 的 warmup 起始 epoch (前面权重为0)")
-    p.add_argument("--loss_warmup_epochs", type=int, default=0, help="对match/sim/kl-soft/swav做线性warmup的epoch数 (0表示不启用)")
+    p.add_argument("--loss_warmup_start", type=int, default=80, help="match/sim/kl-soft/swav 的 warmup 起始 epoch (前面权重为0)")
+    p.add_argument("--loss_warmup_epochs", type=int, default=10, help="对match/sim/kl-soft/swav做线性warmup的epoch数 (0表示不启用)")
     args = p.parse_args()
     ds = str(args.dataset).lower()
     defaults = DATASET_DEFAULTS.get(ds, None)
