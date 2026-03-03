@@ -202,8 +202,8 @@ class FinalModel(nn.Module):
         h_all = F.normalize(h_all, p=2, dim=-1)
 
         cluster_all_logits = self.cluster_head(h_all)
-        cluster_q = [F.softmax(cluster_logits[v], dim=1) for v in range(self.view_num)]
-        cluster_all = F.softmax(cluster_all_logits, dim=1)
+        cluster_q = [F.softmax(cluster_logits[v], dim=1) for v in range(self.view_num)] # N*K
+        cluster_all = F.softmax(cluster_all_logits, dim=1) # N*K
 
         qgs.append(self.predict_distribution(h_all, -1))
         x_homos = []

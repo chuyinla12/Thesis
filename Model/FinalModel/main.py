@@ -32,7 +32,7 @@ DATASET_DEFAULTS = {
         "amazon_computers_use_small": 1,
         "amazon_computers_small_n": 8000,
         "amazon_computers_small_rebuild": 1,
-        "epochs": 500,
+        "epochs": 200,
         "lr": 0.0005,
         "weight_decay": 0.001,
         "grad_clip": 5.0,
@@ -71,7 +71,7 @@ DATASET_DEFAULTS = {
         "gcn_impl": "pyg",
         "alpha": 0.0,
         "beda": 0.0,
-        "gama": 1.0,
+        "gama": 0.0,
         "w_sample": 1.0,
         "sample_loss_impl": "v2",
         "sample_loss_space": "embed",
@@ -94,8 +94,8 @@ DATASET_DEFAULTS = {
         "use_a_pos_weight": 0,
         "kl_max": 1.0,
         "kl_anneal_epochs": 100,
-        "loss_warmup_start": 100,
-        "loss_warmup_epochs": 50,
+        "loss_warmup_start": 0,
+        "loss_warmup_epochs": 0,
         "w_re_x": 0.0,
         "w_re_x_mse": 0.0,
         "w_re_a": 0.0,
@@ -994,6 +994,7 @@ def main():
                 ls = sample_level_loss([Ss[v]], q_in, q_all_in, temperature=args.tau_sample, weight=args.w_sample) # 实例级
             lc = cluster_level_loss(cluster_q[v], cluster_all, temperature=args.tau_cluster, weight=args.w_cluster) # 簇级
             lcl = criterion_cluster(cluster_q[v], cluster_all) # 实例、簇级
+            # lcl = criterion_cluster(vs[v], cs[v])# 原版
             loss_sample = loss_sample + ls
             loss_cluster = loss_cluster + lc
             loss_clusterloss = loss_clusterloss + lcl
