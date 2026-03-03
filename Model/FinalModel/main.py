@@ -32,7 +32,7 @@ DATASET_DEFAULTS = {
         "amazon_computers_use_small": 1,
         "amazon_computers_small_n": 8000,
         "amazon_computers_small_rebuild": 1,
-        "epochs": 400,
+        "epochs": 1000,
         "lr": 0.0005,
         "weight_decay": 0.001,
         "grad_clip": 5.0,
@@ -51,7 +51,7 @@ DATASET_DEFAULTS = {
         "weights_momentum": 0.9,
         "weights_min": 0.05,
         "pseudo_warm_start": 0,
-        "early_stop_patience": 0,
+        "early_stop_patience": 10,
         "debug": 0,
         "debug_interval": 1,
         "debug_hist_k": 7,
@@ -94,7 +94,8 @@ DATASET_DEFAULTS = {
         "use_a_pos_weight": 0,
         "kl_max": 1.0,
         "kl_anneal_epochs": 100,
-        "loss_warmup_epochs": 0,
+        "loss_warmup_start": 0,
+        "loss_warmup_epochs": 100,
         "w_re_x": 0.0,
         "w_re_x_mse": 0.0,
         "w_re_a": 0.0,
@@ -175,6 +176,8 @@ DATASET_DEFAULTS = {
         "use_a_pos_weight": 0,
         "kl_max": 1.0,
         "kl_anneal_epochs": 100,
+        "loss_warmup_start": 0,
+        "loss_warmup_epochs": 0,
         "loss_warmup_epochs": 0,
         "w_re_x": 0.0,
         "w_re_x_mse": 0.0,
@@ -256,6 +259,7 @@ DATASET_DEFAULTS = {
         "use_a_pos_weight": 0,
         "kl_max": 1.0,
         "kl_anneal_epochs": 100,
+        "loss_warmup_start": 0,
         "loss_warmup_epochs": 0,
         "w_re_x": 0.0,
         "w_re_x_mse": 0.0,
@@ -337,6 +341,7 @@ DATASET_DEFAULTS = {
         "use_a_pos_weight": 0,
         "kl_max": 1.0,
         "kl_anneal_epochs": 100,
+        "loss_warmup_start": 0,
         "loss_warmup_epochs": 0,
         "w_re_x": 0.0,
         "w_re_x_mse": 0.0,
@@ -418,6 +423,7 @@ DATASET_DEFAULTS = {
         "use_a_pos_weight": 0,
         "kl_max": 1.0,
         "kl_anneal_epochs": 100,
+        "loss_warmup_start": 0,
         "loss_warmup_epochs": 0,
         "w_re_x": 0.0,
         "w_re_x_mse": 0.0,
@@ -499,6 +505,7 @@ DATASET_DEFAULTS = {
         "use_a_pos_weight": 0,
         "kl_max": 1.0,
         "kl_anneal_epochs": 100,
+        "loss_warmup_start": 0,
         "loss_warmup_epochs": 0,
         "w_re_x": 0.0,
         "w_re_x_mse": 0.0,
@@ -633,6 +640,7 @@ def build_args():
     p.add_argument("--use_a_pos_weight", type=int, default=0, help="结构重构BCE是否使用正样本加权 (解决稀疏性)")
     p.add_argument("--kl_max", type=float, default=1.0, help="Student-t KL损失的最大权重 (用于Annealing)")
     p.add_argument("--kl_anneal_epochs", type=int, default=100, help="Student-t KL损失权重的退火周期 (线性增长)")
+    p.add_argument("--loss_warmup_start", type=int, default=0, help="match/sim/kl-soft/swav 的 warmup 起始 epoch (前面权重为0)")
     p.add_argument("--loss_warmup_epochs", type=int, default=0, help="对match/sim/kl-soft/swav做线性warmup的epoch数 (0表示不启用)")
     args = p.parse_args()
     ds = str(args.dataset).lower()
@@ -795,8 +803,8 @@ def main():
     device = get_device(bool(args.cuda))
     if device.type == "cuda" and N0 > int(args.max_cuda_nodes):
         device = torch.device("cpu")
-    if N0 > int(args.max_cuda_nodes) and args.dataset.lower() == "pubmed":
-        raise RuntimeError("pubmed 节点数过大，当前 dense 实现不支持；请后续切换为 sparse 实现")
+    if N0 > int(args.max_cuda_nodes):
+        raise RuntimeError("节点数过大，当前 dense 实现不支持；请后续切换为 sparse 实现")
     labels = labels.to(device)
     features = features.to(device)
     adj_label = adj_label.to(device).to(torch.float32)
@@ -983,9 +991,9 @@ def main():
             if sample_impl == "v1":
                 ls = sample_level_loss_v1([Ss[v]], q_in, q_all_in, temperature=args.tau_sample, weight=args.w_sample)
             else:
-                ls = sample_level_loss([Ss[v]], q_in, q_all_in, temperature=args.tau_sample, weight=args.w_sample)
-            lc = cluster_level_loss(cluster_q[v], cluster_all, temperature=args.tau_cluster, weight=args.w_cluster)
-            lcl = criterion_cluster(cluster_q[v], cluster_all)
+                ls = sample_level_loss([Ss[v]], q_in, q_all_in, temperature=args.tau_sample, weight=args.w_sample) # 实例级
+            lc = cluster_level_loss(cluster_q[v], cluster_all, temperature=args.tau_cluster, weight=args.w_cluster) # 簇级
+            lcl = criterion_cluster(cluster_q[v], cluster_all) # 实例、簇级
             loss_sample = loss_sample + ls
             loss_cluster = loss_cluster + lc
             loss_clusterloss = loss_clusterloss + lcl
@@ -1040,7 +1048,12 @@ def main():
         kl_div = kl_loss(cluster_q, cluster_all)
         warm = 1.0
         if int(args.loss_warmup_epochs) > 0:
-            warm = min(1.0, float(epoch + 1) / float(max(1, int(args.loss_warmup_epochs))))
+            start = int(getattr(args, "loss_warmup_start", 0))
+            t = int(epoch + 1) - start
+            if t <= 0:
+                warm = 0.0
+            else:
+                warm = min(1.0, float(t) / float(max(1, int(args.loss_warmup_epochs))))
         alpha_w = float(args.alpha) * warm
         beda_w = float(args.beda) * warm
         gama_w = float(args.gama) * warm
