@@ -3,6 +3,8 @@ import os
 
 import numpy as np
 import torch
+import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap, PowerNorm
 from sklearn.cluster import KMeans
 
 from data import load_dataset
@@ -22,6 +24,76 @@ def _weights_from_homo(homo_rate, weights_min=0.05):
     return w
 
 
+def _ensure_dir(path: str):
+    os.makedirs(path, exist_ok=True)
+
+
+def _pick_indices(labels: torch.Tensor, sample_n: int, seed: int):
+    n = int(labels.numel())
+    sample_n = int(sample_n)
+    if sample_n <= 0 or sample_n >= n:
+        return torch.arange(n, device=labels.device)
+    g = torch.Generator(device="cpu")
+    g.manual_seed(int(seed))
+    perm = torch.randperm(n, generator=g)
+    return perm[:sample_n].to(labels.device)
+
+
+def _save_adj_figure(dataset: str, labels: torch.Tensor, adj_gca: torch.Tensor, adj_knn: torch.Tensor, adj_label: torch.Tensor, out_path: str, sample_n: int, seed: int, sort_by_label: int, dpi: int):
+    idx = _pick_indices(labels, sample_n=sample_n, seed=seed)
+    y = labels[idx].detach().cpu()
+    if int(sort_by_label) == 1:
+        order = torch.argsort(y)
+        idx = idx[order.to(idx.device)]
+        y = y[order]
+
+    A_gca = adj_gca[idx][:, idx].detach().cpu()
+    A_knn = adj_knn[idx][:, idx].detach().cpu()
+    A_gt = adj_label[idx][:, idx].detach().cpu()
+    A_ours = torch.clamp(A_gca + A_knn, 0, 1)
+
+    mats = [
+        (A_gca, "(a) GCA"),
+        (A_knn, "(b) KNN"),
+        (A_ours, "(c) Ours"),
+        (A_gt, "(d) Ground truth"),
+    ]
+
+    cmap = ListedColormap(["#ffffff", "#4d0010"])
+    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
+    axes = axes.reshape(-1)
+    for ax, (A, title) in zip(axes, mats):
+        B = (A > 0).numpy().astype(np.uint8)
+        n = int(B.shape[0])
+        if n >= 400:
+            target = 400
+            bs = max(1, int(np.ceil(n / target)))
+            m = int(np.ceil(n / bs))
+            pad = m * bs - n
+            if pad > 0:
+                Bp = np.pad(B, ((0, pad), (0, pad)), mode="constant", constant_values=0)
+            else:
+                Bp = B
+            dens = Bp.reshape(m, bs, m, bs).sum(axis=(1, 3)).astype(np.float32) / float(bs * bs)
+            vmax = float(np.percentile(dens, 99.5))
+            vmax = max(vmax, 1e-6)
+            ax.imshow(
+                dens,
+                cmap="Reds",
+                interpolation="nearest",
+                norm=PowerNorm(gamma=0.35, vmin=0.0, vmax=vmax),
+            )
+        else:
+            ax.imshow(B, cmap=cmap, interpolation="none", vmin=0, vmax=1)
+        ax.set_title(title)
+        ax.axis("off")
+    fig.text(0.5, 0.03, str(dataset), ha="center", va="center", fontsize=16)
+    fig.tight_layout(rect=[0, 0.05, 1, 1])
+    _ensure_dir(os.path.dirname(out_path))
+    fig.savefig(out_path, dpi=int(dpi))
+    plt.close(fig)
+
+
 def main():
     root = os.path.dirname(os.path.abspath(__file__))
     p = argparse.ArgumentParser()
@@ -36,13 +108,18 @@ def main():
     p.add_argument("--kmeans_n_init", type=int, default=24)
     p.add_argument("--eval_no_aug", type=int, default=1)
     p.add_argument("--use_saved_snapshot", type=int, default=1)
+    p.add_argument("--save_fig", type=int, default=0)
+    p.add_argument("--fig_dir", type=str, default=os.path.join(root, "vis_results"))
+    p.add_argument("--fig_sample_n", type=int, default=1000)
+    p.add_argument("--fig_sort_by_label", type=int, default=1)
+    p.add_argument("--fig_dpi", type=int, default=300)
     args = p.parse_args()
 
     ckpt_path = os.path.abspath(args.ckpt)
     state = torch.load(ckpt_path, map_location="cpu")
     ckpt_args = state.get("args", {}) or {}
     snapshot = state.get("eval_snapshot", None)
-    if int(args.use_saved_snapshot) == 1 and isinstance(snapshot, dict):
+    if int(args.use_saved_snapshot) == 1 and int(args.save_fig) == 0 and isinstance(snapshot, dict):
         y_true = snapshot.get("y_true", None)
         y_pred = snapshot.get("y_pred", None)
         if torch.is_tensor(y_true) and torch.is_tensor(y_pred):
@@ -163,6 +240,22 @@ def main():
     print("ckpt", ckpt_path)
     print("eval_embed", args.eval_embed, "eval_mode", args.eval_mode, "seed", args.seed)
     print("acc", float(acc), "nmi", float(nmi), "ari", float(ari), "f1", float(f1))
+    if int(args.save_fig) == 1:
+        out_name = f"{str(dataset)}_eval_{str(args.eval_embed)}_{str(args.eval_mode)}.png"
+        out_path = os.path.join(str(args.fig_dir), out_name)
+        _save_adj_figure(
+            dataset=str(dataset),
+            labels=labels,
+            adj_gca=adj_gca,
+            adj_knn=adj_knn,
+            adj_label=adj_label,
+            out_path=out_path,
+            sample_n=int(args.fig_sample_n),
+            seed=int(args.seed),
+            sort_by_label=int(args.fig_sort_by_label),
+            dpi=int(args.fig_dpi),
+        )
+        print("saved_fig", os.path.abspath(out_path))
 
 
 if __name__ == "__main__":

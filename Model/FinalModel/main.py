@@ -361,7 +361,7 @@ DATASET_DEFAULTS = {
         "amazon_computers_use_small": 0,
         "amazon_computers_small_n": 8000,
         "amazon_computers_small_rebuild": 0,
-        "epochs": 200,
+        "epochs": 300,
         "lr": 0.0005,
         "weight_decay": 0.001,
         "grad_clip": 5.0,
