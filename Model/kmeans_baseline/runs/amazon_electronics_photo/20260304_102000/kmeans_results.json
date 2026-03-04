@@ -1,0 +1,44 @@
+{
+  "args": {
+    "dataset": "amazon_electronics_photo",
+    "data_root": "C:\\Users\\Miku12\\Desktop\\GraduationThesis\\Model\\data",
+    "extracted_root": "C:\\Users\\Miku12\\Desktop\\GraduationThesis\\Model\\FinalModel\\data_extracted",
+    "seed": 1,
+    "repeats": 1,
+    "k": 0,
+    "use_raw_features": 0,
+    "l2_normalize": 0,
+    "pca_dim": 0,
+    "n_init": 20,
+    "pubmed_use_small": 0,
+    "pubmed_small_n": 8000,
+    "pubmed_small_rebuild": 0,
+    "amazon_computers_use_small": 0,
+    "amazon_computers_small_n": 8000,
+    "amazon_computers_small_rebuild": 0,
+    "out_dir": "C:\\Users\\Miku12\\Desktop\\GraduationThesis\\Model\\kmeans_baseline\\runs",
+    "tag": ""
+  },
+  "k": 8,
+  "pca": null,
+  "runs": [
+    {
+      "run": 0,
+      "seed": 1,
+      "acc": 0.40901960784313723,
+      "nmi": 0.3132260987364629,
+      "ari": 0.16590139672665763,
+      "f1": 0.29689361229203154
+    }
+  ],
+  "summary": {
+    "acc_mean": 0.40901960784313723,
+    "acc_std": 0.0,
+    "nmi_mean": 0.3132260987364629,
+    "nmi_std": 0.0,
+    "ari_mean": 0.16590139672665763,
+    "ari_std": 0.0,
+    "f1_mean": 0.29689361229203154,
+    "f1_std": 0.0
+  }
+}

@@ -148,8 +148,13 @@ def prune_high_ebc_edges(adj: torch.Tensor, ratio: float, approx_k: int = 256, s
     G = nx.Graph()
     G.add_nodes_from(range(N))
     G.add_edges_from([(int(u), int(v)) for u, v in edges])
-    if approx_k is not None and int(approx_k) > 0:
-        bc = nx.edge_betweenness_centrality(G, k=int(approx_k), seed=int(seed))
+    k = None
+    if approx_k is not None:
+        k = int(approx_k)
+        if k <= 0 or k >= N:
+            k = None
+    if k is not None:
+        bc = nx.edge_betweenness_centrality(G, k=k, seed=int(seed))
     else:
         bc = nx.edge_betweenness_centrality(G)
     m = len(bc)

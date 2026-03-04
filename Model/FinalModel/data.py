@@ -444,6 +444,204 @@ def load_npz_graph(data_root: str, filename: str):
     return labels, adj, features, adj_label, feature_label
 
 
+def load_chameleon_raw(data_root: str):
+    base = data_root
+    if os.path.isdir(data_root):
+        edge_file = _find_file_recursive(data_root, "chameleon.edge")
+        feat_file = _find_file_recursive(data_root, "chameleon.feature")
+        label_file = _find_file_recursive(data_root, "chameleon.label")
+        if edge_file is None or feat_file is None or label_file is None:
+            raise FileNotFoundError(f"Missing chameleon.{{edge,feature,label}} under {data_root}")
+    else:
+        base = os.path.dirname(os.path.abspath(data_root))
+        edge_file = os.path.join(base, "chameleon.edge")
+        feat_file = os.path.join(base, "chameleon.feature")
+        label_file = os.path.join(base, "chameleon.label")
+        if not (os.path.exists(edge_file) and os.path.exists(feat_file) and os.path.exists(label_file)):
+            raise FileNotFoundError(f"Missing chameleon.{{edge,feature,label}} near {data_root}")
+
+    labels_np = np.loadtxt(label_file, dtype=np.int64).reshape(-1)
+
+    feats_np = np.loadtxt(feat_file, dtype=np.float32)
+    if feats_np.ndim == 1:
+        feats_np = feats_np.reshape(1, -1)
+    if feats_np.shape[0] != labels_np.shape[0]:
+        probe = min(200, int(feats_np.shape[0]))
+        if probe > 1 and np.allclose(feats_np[:probe, 0], np.arange(probe, dtype=np.float32)):
+            feats_np = feats_np[:, 1:]
+        if feats_np.shape[0] != labels_np.shape[0]:
+            raise ValueError(f"chameleon feature/label rows mismatch: X={feats_np.shape[0]} vs y={labels_np.shape[0]}")
+
+    edges = np.loadtxt(edge_file, dtype=np.int64)
+    if edges.ndim == 1:
+        edges = edges.reshape(1, -1)
+    if edges.shape[1] != 2:
+        raise ValueError(f"chameleon.edge must have 2 columns, got {edges.shape}")
+
+    n0 = int(labels_np.shape[0])
+    n1 = int(feats_np.shape[0])
+    n2 = int(np.max(edges)) + 1 if edges.size else 0
+    N = int(max(n0, n1, n2))
+    if N <= 0:
+        raise ValueError("Empty chameleon dataset")
+
+    if labels_np.shape[0] != N:
+        raise ValueError(f"labels length mismatch: got {labels_np.shape[0]} expected {N}")
+    if feats_np.shape[0] != N:
+        raise ValueError(f"features rows mismatch: got {feats_np.shape[0]} expected {N}")
+
+    uniq = np.unique(labels_np)
+    if uniq.size and (uniq.min() != 0 or uniq.max() != uniq.size - 1):
+        remap = {int(v): i for i, v in enumerate(uniq.tolist())}
+        labels_np = np.asarray([remap[int(v)] for v in labels_np], dtype=np.int64)
+
+    u = edges[:, 0].astype(np.int64)
+    v = edges[:, 1].astype(np.int64)
+    m = (u >= 0) & (u < N) & (v >= 0) & (v < N)
+    u = u[m]
+    v = v[m]
+    adj = sp.coo_matrix((np.ones(u.shape[0], dtype=np.float32), (u, v)), shape=(N, N), dtype=np.float32)
+    adj = adj + adj.T.multiply(adj.T > adj) - adj.multiply(adj.T > adj)
+    adj_noeye = adj.tocsr()
+    adj_noeye.setdiag(0)
+    adj_noeye.eliminate_zeros()
+
+    adj_norm = adj_noeye + sp.eye(N, dtype=np.float32, format="csr")
+    adj_norm = normalize_spadj(adj_norm)
+
+    features_unorm = sp.csr_matrix(feats_np, dtype=np.float32)
+    features = normalize_spfeatures(features_unorm)
+
+    labels = torch.LongTensor(labels_np)
+    features = torch.FloatTensor(np.array(features.todense()))
+    feature_label = torch.FloatTensor(feats_np.astype(np.float32))
+    adj = torch.FloatTensor(np.array(adj_norm.todense()))
+    adj_label = torch.FloatTensor(np.array(adj_noeye.todense()) != 0)
+    return labels, adj, features, adj_label, feature_label
+
+
+def load_bat_npy(data_root: str):
+    if os.path.isdir(data_root):
+        adj_file = _find_file_recursive(data_root, "bat_adj.npy")
+        feat_file = _find_file_recursive(data_root, "bat_feat.npy")
+        label_file = _find_file_recursive(data_root, "bat_label.npy")
+        if adj_file is None or feat_file is None or label_file is None:
+            raise FileNotFoundError(f"Missing bat_*.npy under {data_root}")
+    else:
+        base = os.path.dirname(os.path.abspath(data_root))
+        adj_file = os.path.join(base, "bat_adj.npy")
+        feat_file = os.path.join(base, "bat_feat.npy")
+        label_file = os.path.join(base, "bat_label.npy")
+        if not (os.path.exists(adj_file) and os.path.exists(feat_file) and os.path.exists(label_file)):
+            raise FileNotFoundError(f"Missing bat_*.npy near {data_root}")
+
+    labels_np = np.load(label_file, allow_pickle=True).astype(np.int64).reshape(-1)
+    feats_np = np.load(feat_file, allow_pickle=True).astype(np.float32)
+    adj_np = np.load(adj_file, allow_pickle=True)
+
+    if feats_np.ndim != 2:
+        feats_np = feats_np.reshape(feats_np.shape[0], -1)
+
+    if adj_np.ndim != 2 or adj_np.shape[0] != adj_np.shape[1]:
+        raise ValueError(f"bat_adj.npy must be square 2D, got {adj_np.shape}")
+
+    N = int(adj_np.shape[0])
+    if labels_np.shape[0] != N:
+        raise ValueError(f"bat_label length mismatch: y={labels_np.shape[0]} vs N={N}")
+    if feats_np.shape[0] != N:
+        raise ValueError(f"bat_feat rows mismatch: X={feats_np.shape[0]} vs N={N}")
+
+    uniq = np.unique(labels_np)
+    if uniq.size and (uniq.min() != 0 or uniq.max() != uniq.size - 1):
+        remap = {int(v): i for i, v in enumerate(uniq.tolist())}
+        labels_np = np.asarray([remap[int(v)] for v in labels_np], dtype=np.int64)
+
+    if sp.issparse(adj_np):
+        adj = adj_np.tocsr().astype(np.float32)
+    else:
+        adj = sp.csr_matrix(adj_np.astype(np.float32))
+
+    adj_noeye = adj.tocsr()
+    adj_noeye.setdiag(0)
+    adj_noeye.eliminate_zeros()
+    adj_noeye = adj_noeye + adj_noeye.T.multiply(adj_noeye.T > adj_noeye) - adj_noeye.multiply(adj_noeye.T > adj_noeye)
+    adj_noeye.eliminate_zeros()
+
+    adj_norm = adj_noeye + sp.eye(N, dtype=np.float32, format="csr")
+    adj_norm = normalize_spadj(adj_norm)
+
+    features_unorm = sp.csr_matrix(feats_np, dtype=np.float32)
+    features = normalize_spfeatures(features_unorm)
+
+    labels = torch.LongTensor(labels_np)
+    features = torch.FloatTensor(np.array(features.todense()))
+    feature_label = torch.FloatTensor(feats_np)
+    adj = torch.FloatTensor(np.array(adj_norm.todense()))
+    adj_label = torch.FloatTensor(np.array(adj_noeye.todense()) != 0)
+    return labels, adj, features, adj_label, feature_label
+
+
+def load_amap_npy(data_root: str):
+    if os.path.isdir(data_root):
+        adj_file = _find_file_recursive(data_root, "amap_adj.npy")
+        feat_file = _find_file_recursive(data_root, "amap_feat.npy")
+        label_file = _find_file_recursive(data_root, "amap_label.npy")
+        if adj_file is None or feat_file is None or label_file is None:
+            raise FileNotFoundError(f"Missing amap_*.npy under {data_root}")
+    else:
+        base = os.path.dirname(os.path.abspath(data_root))
+        adj_file = os.path.join(base, "amap_adj.npy")
+        feat_file = os.path.join(base, "amap_feat.npy")
+        label_file = os.path.join(base, "amap_label.npy")
+        if not (os.path.exists(adj_file) and os.path.exists(feat_file) and os.path.exists(label_file)):
+            raise FileNotFoundError(f"Missing amap_*.npy near {data_root}")
+
+    labels_np = np.load(label_file, allow_pickle=True).astype(np.int64).reshape(-1)
+    feats_np = np.load(feat_file, allow_pickle=True).astype(np.float32)
+    adj_np = np.load(adj_file, allow_pickle=True)
+
+    if feats_np.ndim != 2:
+        feats_np = feats_np.reshape(feats_np.shape[0], -1)
+
+    if adj_np.ndim != 2 or adj_np.shape[0] != adj_np.shape[1]:
+        raise ValueError(f"amap_adj.npy must be square 2D, got {adj_np.shape}")
+
+    N = int(adj_np.shape[0])
+    if labels_np.shape[0] != N:
+        raise ValueError(f"amap_label length mismatch: y={labels_np.shape[0]} vs N={N}")
+    if feats_np.shape[0] != N:
+        raise ValueError(f"amap_feat rows mismatch: X={feats_np.shape[0]} vs N={N}")
+
+    uniq = np.unique(labels_np)
+    if uniq.size and (uniq.min() != 0 or uniq.max() != uniq.size - 1):
+        remap = {int(v): i for i, v in enumerate(uniq.tolist())}
+        labels_np = np.asarray([remap[int(v)] for v in labels_np], dtype=np.int64)
+
+    if sp.issparse(adj_np):
+        adj = adj_np.tocsr().astype(np.float32)
+    else:
+        adj = sp.csr_matrix(adj_np.astype(np.float32))
+
+    adj_noeye = adj.tocsr()
+    adj_noeye.setdiag(0)
+    adj_noeye.eliminate_zeros()
+    adj_noeye = adj_noeye + adj_noeye.T.multiply(adj_noeye.T > adj_noeye) - adj_noeye.multiply(adj_noeye.T > adj_noeye)
+    adj_noeye.eliminate_zeros()
+
+    adj_norm = adj_noeye + sp.eye(N, dtype=np.float32, format="csr")
+    adj_norm = normalize_spadj(adj_norm)
+
+    features_unorm = sp.csr_matrix(feats_np, dtype=np.float32)
+    features = normalize_spfeatures(features_unorm)
+
+    labels = torch.LongTensor(labels_np)
+    features = torch.FloatTensor(np.array(features.todense()))
+    feature_label = torch.FloatTensor(feats_np)
+    adj = torch.FloatTensor(np.array(adj_norm.todense()))
+    adj_label = torch.FloatTensor(np.array(adj_noeye.todense()) != 0)
+    return labels, adj, features, adj_label, feature_label
+
+
 def load_dataset(
     dataset: str,
     data_root: str,
@@ -490,6 +688,12 @@ def load_dataset(
             )
             return load_npz_graph(data_root=extracted_root, filename="amazon_electronics_computers-small.npz")
         return load_npz_graph(data_root=data_root, filename="amazon_electronics_computers.npz")
+    if ds in ["chameleon"]:
+        return load_chameleon_raw(data_root=data_root)
+    if ds in ["bat"]:
+        return load_bat_npy(data_root=data_root)
+    if ds in ["amap"]:
+        return load_amap_npy(data_root=data_root)
     if ds in [
         "amazon_electronics_computers-small",
         "amazon_electronics_computers_small",
