@@ -6,16 +6,33 @@ import torch
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap, PowerNorm
 from sklearn.cluster import KMeans
+import torch.nn.functional as F
 
+# 假设你有这些自定义模块，路径需确保正确
 from data import load_dataset
 from models import FinalModel
 from utils import eva, get_device, set_seed
 from views import build_gca_view, build_knn_adj, make_message_passing_adj, prune_high_ebc_edges, prune_low_degree_edges
 
+# ======================== 核心路径常量（固定相对路径）========================
+# 项目根目录：当前脚本所在的目录（作为所有相对路径的基准）
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
-def _default_save_dir(root, dataset):
-    return os.path.join(root, "runs", str(dataset))
+# 固定的子目录定义（全部基于PROJECT_ROOT的相对路径）
+RUNS_DIR = os.path.join(PROJECT_ROOT, "runs")          # 模型 checkpoint 存储目录
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")          # 原始数据目录
+EXTRACTED_DATA_DIR = os.path.join(PROJECT_ROOT, "data_extracted")  # 提取后的数据目录
+VIS_RESULTS_DIR = os.path.join(PROJECT_ROOT, "vis_results")  # 可视化结果保存目录
 
+# 如果本地data目录不存在，尝试使用上级目录的data
+if not os.path.exists(DATA_DIR):
+    PARENT_DATA_DIR = os.path.join(os.path.dirname(PROJECT_ROOT), "data")
+    if os.path.exists(PARENT_DATA_DIR):
+        DATA_DIR = PARENT_DATA_DIR
+
+def _default_save_dir(dataset):
+    """固定相对路径：runs/数据集名"""
+    return os.path.join(RUNS_DIR, str(dataset))
 
 def _weights_from_homo(homo_rate, weights_min=0.05):
     w = torch.tensor([float(homo_rate[0]), float(homo_rate[1])], dtype=torch.float32)
@@ -23,10 +40,8 @@ def _weights_from_homo(homo_rate, weights_min=0.05):
     w = w / (w.sum() + 1e-12)
     return w
 
-
 def _ensure_dir(path: str):
     os.makedirs(path, exist_ok=True)
-
 
 def _pick_indices(labels: torch.Tensor, sample_n: int, seed: int):
     n = int(labels.numel())
@@ -37,7 +52,6 @@ def _pick_indices(labels: torch.Tensor, sample_n: int, seed: int):
     g.manual_seed(int(seed))
     perm = torch.randperm(n, generator=g)
     return perm[:sample_n].to(labels.device)
-
 
 def _save_adj_figure(dataset: str, labels: torch.Tensor, adj_gca: torch.Tensor, adj_knn: torch.Tensor, adj_label: torch.Tensor, out_path: str, sample_n: int, seed: int, sort_by_label: int, dpi: int):
     idx = _pick_indices(labels, sample_n=sample_n, seed=seed)
@@ -93,14 +107,69 @@ def _save_adj_figure(dataset: str, labels: torch.Tensor, adj_gca: torch.Tensor, 
     fig.savefig(out_path, dpi=int(dpi))
     plt.close(fig)
 
+def _cosine_sim_matrix(x: torch.Tensor):
+    x = x.to(torch.float32)
+    x = F.normalize(x, p=2, dim=1)
+    s = torch.mm(x, x.t())
+    s = torch.clamp(s, -1.0, 1.0)
+    return s
+
+def _save_emb_figure(
+    dataset: str,
+    labels: torch.Tensor,
+    x_raw: torch.Tensor,
+    h_gca: torch.Tensor,
+    h_knn: torch.Tensor,
+    h_all: torch.Tensor,
+    out_path: str,
+    sample_n: int,
+    seed: int,
+    sort_by_label: int,
+    dpi: int,
+):
+    idx = _pick_indices(labels, sample_n=sample_n, seed=seed)
+    y = labels[idx].detach().cpu()
+    if int(sort_by_label) == 1:
+        order = torch.argsort(y)
+        idx = idx[order.to(idx.device)]
+        y = y[order]
+
+    mats = [
+        (_cosine_sim_matrix(x_raw[idx][:].detach().cpu()), "(a) X"),
+        (_cosine_sim_matrix(h_gca[idx][:].detach().cpu()), "(b) GCA (GCN)"),
+        (_cosine_sim_matrix(h_knn[idx][:].detach().cpu()), "(c) KNN (GCN)"),
+        (_cosine_sim_matrix(h_all[idx][:].detach().cpu()), "(d) h_all"),
+    ]
+
+    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
+    axes = axes.reshape(-1)
+    for ax, (S, title) in zip(axes, mats):
+        M = ((S + 1.0) * 0.5).numpy().astype(np.float32)
+        vmin = float(np.percentile(M, 5))
+        vmax = float(np.percentile(M, 99))
+        if vmax <= vmin:
+            vmin = 0.0
+            vmax = 1.0
+        ax.imshow(M, cmap="Reds", interpolation="nearest", norm=PowerNorm(gamma=0.5, vmin=vmin, vmax=vmax))
+        ax.set_title(title)
+        ax.axis("off")
+    fig.text(0.5, 0.03, str(dataset), ha="center", va="center", fontsize=16)
+    fig.tight_layout(rect=[0, 0.05, 1, 1])
+    _ensure_dir(os.path.dirname(out_path))
+    fig.savefig(out_path, dpi=int(dpi))
+    plt.close(fig)
 
 def main():
-    root = os.path.dirname(os.path.abspath(__file__))
+    # ======================== 命令行参数 ========================
     p = argparse.ArgumentParser()
-    p.add_argument("--ckpt", type=str, default=os.path.join(_default_save_dir(root, "cora"), "best.pt"))
+    # 默认 checkpoint 路径：runs/cora/best.pt（固定相对路径）
+    p.add_argument("--ckpt", type=str, default=os.path.join(_default_save_dir("cora"), "best.pt"))
     p.add_argument("--dataset", type=str, default=None)
-    p.add_argument("--data_root", type=str, default=None)
-    p.add_argument("--extracted_root", type=str, default=None)
+    # 以下路径参数改为可选，默认使用固定相对路径
+    p.add_argument("--data_root", type=str, default=DATA_DIR)
+    p.add_argument("--extracted_root", type=str, default=EXTRACTED_DATA_DIR)
+    p.add_argument("--fig_dir", type=str, default=VIS_RESULTS_DIR)
+    
     p.add_argument("--cuda", type=int, default=1)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--eval_mode", type=str, default="kmeans")
@@ -109,17 +178,26 @@ def main():
     p.add_argument("--eval_no_aug", type=int, default=1)
     p.add_argument("--use_saved_snapshot", type=int, default=1)
     p.add_argument("--save_fig", type=int, default=0)
-    p.add_argument("--fig_dir", type=str, default=os.path.join(root, "vis_results"))
+    p.add_argument("--save_emb_fig", type=int, default=0)
     p.add_argument("--fig_sample_n", type=int, default=1000)
     p.add_argument("--fig_sort_by_label", type=int, default=1)
     p.add_argument("--fig_dpi", type=int, default=300)
+    p.add_argument("--x_source", type=str, default="feature_label")
     args = p.parse_args()
 
+    # ======================== 加载 checkpoint ========================
     ckpt_path = os.path.abspath(args.ckpt)
     state = torch.load(ckpt_path, map_location="cpu")
     ckpt_args = state.get("args", {}) or {}
     snapshot = state.get("eval_snapshot", None)
-    if int(args.use_saved_snapshot) == 1 and int(args.save_fig) == 0 and isinstance(snapshot, dict):
+    
+    # 优先使用 snapshot 中的评估结果（如果存在）
+    if (
+        int(args.use_saved_snapshot) == 1
+        and int(args.save_fig) == 0
+        and int(args.save_emb_fig) == 0
+        and isinstance(snapshot, dict)
+    ):
         y_true = snapshot.get("y_true", None)
         y_pred = snapshot.get("y_pred", None)
         if torch.is_tensor(y_true) and torch.is_tensor(y_pred):
@@ -134,11 +212,15 @@ def main():
             print("saved_acc", m.get("acc", None), "saved_nmi", m.get("nmi", None), "saved_ari", m.get("ari", None), "saved_f1", m.get("f1", None))
             return
 
-    dataset = args.dataset if args.dataset is not None else ckpt_args.get("dataset", "cora")
-    data_root = args.data_root if args.data_root is not None else ckpt_args.get("data_root", os.path.join(root, "data"))
-    extracted_root = args.extracted_root if args.extracted_root is not None else ckpt_args.get("extracted_root", os.path.join(root, "data_extracted"))
-    extracted_root = extracted_root if extracted_root is not None else os.path.join(root, "data_extracted")
+    # ======================== 确定数据集和路径 ========================
+    # 数据集名称：命令行参数 > checkpoint 参数 > 默认 cora
+    dataset = args.dataset or ckpt_args.get("dataset", "cora")
+    # 数据路径：命令行参数（已默认固定路径）> checkpoint 参数 > 固定路径
+    data_root = args.data_root or ckpt_args.get("data_root", DATA_DIR)
+    extracted_root = args.extracted_root or ckpt_args.get("extracted_root", EXTRACTED_DATA_DIR)
+    fig_dir = args.fig_dir or VIS_RESULTS_DIR
 
+    # ======================== 初始化环境和数据 ========================
     set_seed(args.seed)
     labels, adj, features, adj_label, feature_label = load_dataset(dataset, data_root, extracted_root)
 
@@ -146,11 +228,13 @@ def main():
     labels = labels.to(device)
     features = features.to(device)
     adj_label = adj_label.to(device).to(torch.float32)
+    feature_label = feature_label.to(device) if torch.is_tensor(feature_label) else feature_label
 
     class_num = int(labels.max().item()) + 1
     N = int(features.size(0))
     input_dim_x = int(features.size(1))
 
+    # ======================== 初始化模型 ========================
     hidden_dim = int(ckpt_args.get("hidden_dim", 256))
     output_dim_g = int(ckpt_args.get("output_dim_g", 64))
     gcn_dropout = float(ckpt_args.get("gcn_dropout", 0.1))
@@ -173,6 +257,7 @@ def main():
     model.load_state_dict(state["model"], strict=True)
     model.eval()
 
+    # ======================== 构建邻接矩阵 ========================
     knn_k = int(ckpt_args.get("knn_k", 20))
     knn_metric = str(ckpt_args.get("knn_metric", "cosine"))
     p_low_deg = float(ckpt_args.get("p_low_deg", 0.0))
@@ -193,6 +278,7 @@ def main():
         gca_drop_edge_p = 0.0
         gca_drop_feat_p = 0.0
 
+    # ======================== 模型推理 ========================
     with torch.no_grad():
         x_gca, adj_gca, adj_gca_mp = build_gca_view(features, adj_label, gca_drop_edge_p, gca_drop_feat_p)
         x_gca = x_gca.to(device)
@@ -218,6 +304,7 @@ def main():
         h_all = out[2]
         cluster_all = out[12]
 
+        # 选择评估用的嵌入
         ee = str(args.eval_embed).strip().lower()
         if ee == "h0":
             emb = hs[0]
@@ -228,6 +315,7 @@ def main():
         else:
             emb = h_all
 
+        # 聚类评估
         em = emb.detach().cpu().numpy()
         if str(args.eval_mode).strip().lower() == "argmax":
             y_pred = torch.argmax(cluster_all, dim=1).detach().cpu().numpy()
@@ -235,14 +323,17 @@ def main():
             km = KMeans(n_clusters=class_num, n_init=int(args.kmeans_n_init), random_state=int(args.seed))
             y_pred = km.fit_predict(em)
 
+    # ======================== 评估和可视化 ========================
     y_true = labels.detach().cpu().numpy()
     nmi, acc, ari, f1 = eva(y_true, y_pred, epoch=0, visible=True)
     print("ckpt", ckpt_path)
     print("eval_embed", args.eval_embed, "eval_mode", args.eval_mode, "seed", args.seed)
     print("acc", float(acc), "nmi", float(nmi), "ari", float(ari), "f1", float(f1))
+    
+    # 保存邻接矩阵可视化图
     if int(args.save_fig) == 1:
         out_name = f"{str(dataset)}_eval_{str(args.eval_embed)}_{str(args.eval_mode)}.png"
-        out_path = os.path.join(str(args.fig_dir), out_name)
+        out_path = os.path.join(fig_dir, out_name)
         _save_adj_figure(
             dataset=str(dataset),
             labels=labels,
@@ -256,7 +347,27 @@ def main():
             dpi=int(args.fig_dpi),
         )
         print("saved_fig", os.path.abspath(out_path))
-
+    
+    # 保存嵌入可视化图
+    if int(args.save_emb_fig) == 1:
+        xs = str(args.x_source).strip().lower()
+        x0 = feature_label if xs in ["feature_label", "raw", "x"] else features
+        out_name = f"{str(dataset)}_emb_heatmap.png"
+        out_path = os.path.join(fig_dir, out_name)
+        _save_emb_figure(
+            dataset=str(dataset),
+            labels=labels,
+            x_raw=x0,
+            h_gca=hs[0],
+            h_knn=hs[1],
+            h_all=h_all,
+            out_path=out_path,
+            sample_n=int(args.fig_sample_n),
+            seed=int(args.seed),
+            sort_by_label=int(args.fig_sort_by_label),
+            dpi=int(args.fig_dpi),
+        )
+        print("saved_emb_fig", os.path.abspath(out_path))
 
 if __name__ == "__main__":
     main()

@@ -682,9 +682,9 @@ DATASET_DEFAULTS = {
         "save_dir": None,
         "seed": 2,
         "cuda": 1,
-        "max_cuda_nodes": 10000,
+        "max_cuda_nodes": 12000,
         "pubmed_use_small": 1,
-        "pubmed_small_n": 8000,
+        "pubmed_small_n": 12000,
         "pubmed_small_rebuild": 1,
         "amazon_computers_use_small": 1,
         "amazon_computers_small_n": 8000,
@@ -713,8 +713,8 @@ DATASET_DEFAULTS = {
         "debug_interval": 1,
         "debug_hist_k": 7,
         "dry_run": 0,
-        "gca_drop_edge_p": 0.1,
-        "gca_drop_feat_p": 0.3,
+        "gca_drop_edge_p": 0,
+        "gca_drop_feat_p": 0.1,
         "knn_k": 20,
         "knn_metric": "cosine",
         "p_low_deg": 0,
@@ -789,7 +789,7 @@ def build_args():
     # ---------------- 训练环境与随机种子 ----------------
     p.add_argument("--seed", type=int, default=2, help="随机种子，用于复现结果")
     p.add_argument("--cuda", type=int, default=1, help="是否使用GPU (1:是, 0:否)")
-    p.add_argument("--max_cuda_nodes", type=int, default=10000, help="GPU显存限制下的最大节点数，超过此数将强制使用CPU")
+    p.add_argument("--max_cuda_nodes", type=int, default=12000, help="GPU显存限制下的最大节点数，超过此数将强制使用CPU")
     p.add_argument("--pubmed_use_small", type=int, default=1, help="Pubmed是否使用抽样子图进行训练/评估 (1:是, 0:否)")
     p.add_argument("--pubmed_small_n", type=int, default=8000, help="Pubmed抽样节点数 (按真实标签比例分层抽样)")
     p.add_argument("--pubmed_small_rebuild", type=int, default=0, help="是否强制重新生成 pubmed-small (1:是, 0:否)")
