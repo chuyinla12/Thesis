@@ -79,7 +79,7 @@ DATASET_DEFAULTS = {
         "w_clusterloss": 2.5,
         "w_ne": 1.0,
         "w_swav": 0,
-        "w_kl_g": 0.0,
+        "w_kl_g": 0.5,
         "train_centroids": 0,
         "tau_sample": 0.5,
         "swav_variant": "classic",
@@ -114,7 +114,7 @@ DATASET_DEFAULTS = {
         "amazon_computers_use_small": 1,
         "amazon_computers_small_n": 8000,
         "amazon_computers_small_rebuild": 1,
-        "epochs": 400,
+        "epochs": 200,
         "lr": 0.0005,
         "weight_decay": 0.001,
         "grad_clip": 5.0,
@@ -161,7 +161,7 @@ DATASET_DEFAULTS = {
         "w_clusterloss": 2.5,
         "w_ne": 1.0,
         "w_swav": 0,
-        "w_kl_g": 0.0,
+        "w_kl_g": 0.6,
         "train_centroids": 0,
         "tau_sample": 0.5,
         "swav_variant": "classic",
@@ -408,7 +408,7 @@ DATASET_DEFAULTS = {
         "w_clusterloss": 2.5,
         "w_ne": 1.0,
         "w_swav": 0,
-        "w_kl_g": 0.0,
+        "w_kl_g": 0.5,
         "train_centroids": 0,
         "tau_sample": 0.5,
         "swav_variant": "classic",
@@ -457,7 +457,7 @@ DATASET_DEFAULTS = {
         "classifier_hidden": [128, 64],
         "supervise_match": 0,
         "pseudo_source": "h_all",
-        "update_weights": 0,
+        "update_weights": 1,
         "update_weights_interval": 10,
         "weights_momentum": 0.9,
         "weights_min": 0.05,
@@ -490,7 +490,7 @@ DATASET_DEFAULTS = {
         "w_clusterloss": 2.5,
         "w_ne": 1.0,
         "w_swav": 0,
-        "w_kl_g": 0.0,
+        "w_kl_g": 0.5,
         "train_centroids": 0,
         "tau_sample": 0.5,
         "swav_variant": "classic",
@@ -888,6 +888,8 @@ def build_args():
     p.add_argument("--kl_anneal_epochs", type=int, default=100, help="Student-t KL损失权重的退火周期 (线性增长)")
     p.add_argument("--loss_warmup_start", type=int, default=80, help="match/sim/kl-soft/swav 的 warmup 起始 epoch (前面权重为0)")
     p.add_argument("--loss_warmup_epochs", type=int, default=10, help="对match/sim/kl-soft/swav做线性warmup的epoch数 (0表示不启用)")
+    p.add_argument("--refresh_centroids_interval", type=int, default=10, help="每隔N个epoch用KMeans对(view0/view1/融合)中心做动量刷新 (0表示不刷新)")
+    p.add_argument("--centroid_momentum", type=float, default=0.2, help="中心动量系数 m: c <- (1-m)*c + m*c_kmeans")
     args = p.parse_args()
     ds = str(args.dataset).lower()
     defaults = DATASET_DEFAULTS.get(ds, None)
@@ -1164,6 +1166,21 @@ def main():
             compute_x_pred=(float(args.w_re_x) != 0.0 or float(args.w_re_x_mse) != 0.0),
             compute_a_logits=(float(args.w_re_a) != 0.0),
         )
+
+        if int(getattr(args, "refresh_centroids_interval", 0)) > 0 and ((epoch + 1) % int(args.refresh_centroids_interval) == 0):
+            with torch.no_grad():
+                embeds = [hs[v] for v in range(2)] + [h_all]
+                m = float(getattr(args, "centroid_momentum", 0.2))
+                for i, emb in enumerate(embeds):
+                    X = emb.detach().cpu().numpy()
+                    if not np.isfinite(X).all():
+                        continue
+                    km = KMeans(n_clusters=class_num, n_init=int(args.kmeans_n_init), random_state=args.seed)
+                    _ = km.fit_predict(X)
+                    idx = -1 if i == len(embeds) - 1 else i
+                    new_centers = torch.as_tensor(km.cluster_centers_, device=emb.device, dtype=model.cluster_layers[idx].dtype)
+                    old = model.cluster_layers[idx].data
+                    model.cluster_layers[idx].data.copy_((1.0 - m) * old + m * new_centers)
 
         if int(args.supervise_match) == 0:
             if epoch == 0 or (epoch + 1) % int(args.pseudo_interval) == 0:
