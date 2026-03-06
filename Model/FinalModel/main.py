@@ -17,6 +17,7 @@ from models import FinalModel
 from loss import sample_level_loss, sample_level_loss_v1, cluster_level_loss, ClusterLoss, kl_loss, sim_loss_func, swav_approx_loss, swav_classic_loss, swav_decor_loss, swav_m1_loss
 
 
+
 DATASET_DEFAULTS = {
     "cora": {
         "dataset": "cora",
@@ -851,7 +852,7 @@ def build_args():
     p.add_argument("--gcn_layers", type=int, default=2, help="GCN层数")
     p.add_argument("--gcn_impl", type=str, default="pyg", help="GCN实现: dense / pyg(同Model1)")
 
-    # ---------------- 损失函数权重系数 ----------------
+    # ---------------- 损失函数权重系数 ----------------（只保留sample、cluster、clusterloss、kl_g，其它模块都是实验模块，未用到模型）
     p.add_argument("--alpha", type=float, default=0.0, help="Loss权重: 匹配损失 (Match Loss)")
     p.add_argument("--beda", type=float, default=0.0, help="Loss权重: 相似度重构损失 (Sim Loss)")
     p.add_argument("--gama", type=float, default=0.0, help="Loss权重: 聚类一致性损失 (KL Soft)")
