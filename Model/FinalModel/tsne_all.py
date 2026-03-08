@@ -125,7 +125,9 @@ def _scatter(ax, Z, y, title):
         ax.scatter(Z[m, 0], Z[m, 1], s=4, c=[colors[i]], label=str(int(c)), alpha=0.8, linewidths=0)
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.set_title(title)
+    for s in ["left", "right", "top", "bottom"]:
+        ax.spines[s].set_visible(False)
+    ax.set_frame_on(False)
 
 def _maybe_sample(X, y, sample_n, seed):
     n = X.shape[0]
@@ -157,23 +159,37 @@ def run_for_dataset(dataset, data_root, extracted_root, runs_dir, out_dir, sampl
             X_raw = x_raw.detach().cpu().numpy()
             y = labels.detach().cpu().numpy()
             E = h_all.detach().cpu().numpy()
+            E_gca = hs[0].detach().cpu().numpy()
+            E_knn = hs[1].detach().cpu().numpy()
             X_raw_s, y_s = _maybe_sample(X_raw, y, sample_n, seed)
-            E_s, y_s2 = _maybe_sample(E, y, sample_n, seed)
+            E_s, _ = _maybe_sample(E, y, sample_n, seed)
+            E_gca_s, _ = _maybe_sample(E_gca, y, sample_n, seed)
+            E_knn_s, _ = _maybe_sample(E_knn, y, sample_n, seed)
             p1 = _select_perplexity(X_raw_s.shape[0], p_default)
             p2 = _select_perplexity(E_s.shape[0], p_default)
+            p3 = _select_perplexity(E_gca_s.shape[0], p_default)
+            p4 = _select_perplexity(E_knn_s.shape[0], p_default)
             Z_raw = _tsne_2d(X_raw_s, seed, p1, n_iter)
+            Z_gca = _tsne_2d(E_gca_s, seed, p3, n_iter)
+            Z_knn = _tsne_2d(E_knn_s, seed, p4, n_iter)
             Z_emb = _tsne_2d(E_s, seed, p2, n_iter)
-            fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-            _scatter(axes[0], Z_raw, y_s, "(a) Raw X")
-            _scatter(axes[1], Z_emb, y_s2, "(b) h_all")
-            fig.suptitle(str(dataset))
+            # 单图拆分为四张，无标题，仅通过文件名区分
             _ensure_dir(out_dir)
-            out_path = os.path.join(out_dir, f"{str(dataset)}_tsne.png")
-            fig.tight_layout(rect=[0, 0.03, 1, 0.95])
-            fig.savefig(out_path, dpi=300)
-            plt.close(fig)
-            print("saved_tsne", os.path.abspath(out_path))
-            return out_path
+            base = os.path.join(out_dir, f"{str(dataset)}")
+            outputs = {
+                "raw": (Z_raw, os.path.abspath(base + "_raw.svg")),
+                "gca": (Z_gca, os.path.abspath(base + "_gca.svg")),
+                "knn": (Z_knn, os.path.abspath(base + "_knn.svg")),
+                "hall": (Z_emb, os.path.abspath(base + "_hall.svg")),
+            }
+            for key, (Z_i, out_path) in outputs.items():
+                fig, ax = plt.subplots(1, 1, figsize=(6, 5))
+                _scatter(ax, Z_i, y_s, "")
+                fig.tight_layout()
+                fig.savefig(out_path, format="svg", bbox_inches="tight", pad_inches=0)
+                plt.close(fig)
+                print("saved_tsne", out_path)
+            return list(outputs.values())[0][1]
         except Exception as e:
             last_err = e
             continue

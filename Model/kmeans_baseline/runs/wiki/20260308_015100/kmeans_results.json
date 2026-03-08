@@ -1,0 +1,44 @@
+{
+  "args": {
+    "dataset": "wiki",
+    "data_root": ".\\Model\\data",
+    "extracted_root": ".\\Model\\FinalModel\\data_extracted",
+    "seed": 1,
+    "repeats": 1,
+    "k": 0,
+    "use_raw_features": 0,
+    "l2_normalize": 0,
+    "pca_dim": 0,
+    "n_init": 20,
+    "pubmed_use_small": 0,
+    "pubmed_small_n": 8000,
+    "pubmed_small_rebuild": 0,
+    "amazon_computers_use_small": 0,
+    "amazon_computers_small_n": 8000,
+    "amazon_computers_small_rebuild": 0,
+    "out_dir": ".\\Model\\kmeans_baseline\\runs",
+    "tag": ""
+  },
+  "k": 17,
+  "pca": null,
+  "runs": [
+    {
+      "run": 0,
+      "seed": 1,
+      "acc": 0.4237006237006237,
+      "nmi": 0.4043035203456443,
+      "ari": 0.09855723554151129,
+      "f1": 0.31207363511960784
+    }
+  ],
+  "summary": {
+    "acc_mean": 0.4237006237006237,
+    "acc_std": 0.0,
+    "nmi_mean": 0.4043035203456443,
+    "nmi_std": 0.0,
+    "ari_mean": 0.09855723554151129,
+    "ari_std": 0.0,
+    "f1_mean": 0.31207363511960784,
+    "f1_std": 0.0
+  }
+}
