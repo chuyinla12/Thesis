@@ -183,6 +183,12 @@ def main():
     p.add_argument("--fig_sort_by_label", type=int, default=1)
     p.add_argument("--fig_dpi", type=int, default=300)
     p.add_argument("--x_source", type=str, default="feature_label")
+    p.add_argument("--pubmed_eval_mode", type=str, default="auto")
+    p.add_argument("--pubmed_small_n", type=int, default=8000)
+    p.add_argument("--pubmed_small_rebuild", type=int, default=0)
+    p.add_argument("--amazon_eval_mode", type=str, default="auto")
+    p.add_argument("--amazon_computers_small_n", type=int, default=8000)
+    p.add_argument("--amazon_computers_small_rebuild", type=int, default=0)
     args = p.parse_args()
 
     # ======================== 加载 checkpoint ========================
@@ -192,11 +198,18 @@ def main():
     snapshot = state.get("eval_snapshot", None)
     
     # 优先使用 snapshot 中的评估结果（如果存在）
+    ds_guess = str(args.dataset or ckpt_args.get("dataset", "cora")).lower()
+    pm_full = str(args.pubmed_eval_mode).strip().lower() == "full" and ds_guess == "pubmed"
+    am_full = (
+        str(args.amazon_eval_mode).strip().lower() == "full"
+        and ds_guess in ["amazon_electronics_computers", "amazon-computers", "amazon_computers", "amazon_computers_npz"]
+    )
     if (
         int(args.use_saved_snapshot) == 1
         and int(args.save_fig) == 0
         and int(args.save_emb_fig) == 0
         and isinstance(snapshot, dict)
+        and not (pm_full or am_full)
     ):
         y_true = snapshot.get("y_true", None)
         y_pred = snapshot.get("y_pred", None)
@@ -222,7 +235,43 @@ def main():
 
     # ======================== 初始化环境和数据 ========================
     set_seed(args.seed)
-    labels, adj, features, adj_label, feature_label = load_dataset(dataset, data_root, extracted_root)
+    dsl = str(dataset).lower()
+    pm_mode = str(args.pubmed_eval_mode).strip().lower()
+    if dsl == "pubmed":
+        if pm_mode == "full":
+            pm_use_small = False
+        elif pm_mode == "small":
+            pm_use_small = True
+        else:
+            pm_use_small = False
+        labels, adj, features, adj_label, feature_label = load_dataset(
+            dataset,
+            data_root,
+            extracted_root,
+            seed=int(args.seed),
+            pubmed_small_n=int(args.pubmed_small_n),
+            pubmed_small_rebuild=bool(int(args.pubmed_small_rebuild)),
+            pubmed_use_small=bool(pm_use_small),
+        )
+    elif dsl in ["amazon_electronics_computers", "amazon-computers", "amazon_computers", "amazon_computers_npz"]:
+        am_mode = str(args.amazon_eval_mode).strip().lower()
+        if am_mode == "full":
+            am_use_small = False
+        elif am_mode == "small":
+            am_use_small = True
+        else:
+            am_use_small = False
+        labels, adj, features, adj_label, feature_label = load_dataset(
+            dataset,
+            data_root,
+            extracted_root,
+            seed=int(args.seed),
+            amazon_computers_small_n=int(args.amazon_computers_small_n),
+            amazon_computers_small_rebuild=bool(int(args.amazon_computers_small_rebuild)),
+            amazon_computers_use_small=bool(am_use_small),
+        )
+    else:
+        labels, adj, features, adj_label, feature_label = load_dataset(dataset, data_root, extracted_root)
 
     device = get_device(bool(args.cuda))
     labels = labels.to(device)
@@ -254,7 +303,16 @@ def main():
         gcn_impl=gcn_impl,
         classifier_hidden=classifier_hidden,
     ).to(device)
-    model.load_state_dict(state["model"], strict=True)
+    try:
+        model.load_state_dict(state["model"], strict=True)
+    except Exception:
+        cur_sd = model.state_dict()
+        src_sd = state.get("model", {})
+        filt_sd = {}
+        for k, v in src_sd.items():
+            if k in cur_sd and hasattr(v, "shape") and hasattr(cur_sd[k], "shape") and tuple(v.shape) == tuple(cur_sd[k].shape):
+                filt_sd[k] = v
+        model.load_state_dict(filt_sd, strict=False)
     model.eval()
 
     # ======================== 构建邻接矩阵 ========================

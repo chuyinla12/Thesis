@@ -25,10 +25,11 @@ def load_graph_data(dataset: str, data_root: str):
     if fm_dir not in sys.path:
         sys.path.insert(0, fm_dir)
     import FinalModel.data as fm_data
+    extracted_root = os.path.join(fm_dir, "data_extracted")
     labels, adj, features, _, feature_label = fm_data.load_dataset(
         dataset=dataset,
         data_root=data_root,
-        extracted_root=None,
+        extracted_root=extracted_root,
     )
     x = feature_label.numpy()
     y = labels.numpy()
@@ -40,20 +41,29 @@ def load_gca_ckpt(ckpt_path: str, device: str, in_channels: int):
     """返回 encoder（重建后已加载权重）"""
     ckpt = torch.load(ckpt_path, map_location=device)
     from pGRACE.model import Encoder
-    # 推断 out_channels
+    # 推断超参
     out_channels = None
+    num_layers = 2
+    act_name = "relu"
     if "param" in ckpt:
-        out_channels = ckpt["param"].get("num_hidden") or ckpt["param"].get("hidden")
+        p = ckpt["param"]
+        out_channels = p.get("num_hidden") or p.get("hidden")
+        num_layers = int(p.get("num_layers", num_layers))
+        act_name = str(p.get("activation", act_name)).lower()
     if out_channels is None:
         for k, v in ckpt["encoder_state_dict"].items():
             if isinstance(v, torch.Tensor) and v.ndim == 2:
                 out_channels = max(out_channels or 0, v.shape[0])
-    # 重建 encoder（激活函数按常用 relu）
+    # 激活函数与层数对齐 ckpt
+    if act_name in ["prelu", "p-relu", "p_relu"]:
+        activation = torch.nn.PReLU()
+    else:
+        activation = torch.nn.ReLU()
     encoder = Encoder(
         in_channels=in_channels,
         out_channels=out_channels,
-        activation=torch.nn.ReLU(),
-        k=2,
+        activation=activation,
+        k=int(num_layers),
         skip=False,
     ).to(device)
     encoder.load_state_dict(ckpt["encoder_state_dict"])
