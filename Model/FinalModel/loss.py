@@ -196,7 +196,7 @@ class ClusterLoss(nn.Module):
         logits = torch.cat((positives, negatives), dim=1)
         loss = self.criterion(logits, labels)
         loss = loss / N
-        return loss + self.ne_weight * ne_loss
+        return 0*loss + self.ne_weight * ne_loss
 
 
 def kl_loss(cluster_q_list, cluster_all):
