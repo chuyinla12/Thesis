@@ -17,6 +17,20 @@ except ImportError:
 import re
 import os
 
+def abbreviate_method(name):
+    s = name.lower()
+    if 'no-ne' in s or 'no ne' in s:
+        return 'nne'
+    if 'no-cluster' in s or 'no cluster' in s:
+        return 'ncl'
+    if 'no-kl' in s or 'no kl' in s:
+        return 'nkl'
+    if 'no-sample' in s or 'no sample' in s:
+        return 'nsl'
+    if 'ours' in s:
+        return 'co'
+    return name
+
 def parse_md_table(md_content):
     datasets = {}
     current_dataset = None
@@ -44,7 +58,7 @@ def plot_3d_bar(dataset_name, data, output_path):
     values = np.array(data['values'])
     metrics = ['ACC', 'NMI', 'ARI']
     
-    method_labels = [chr(ord('a') + i) for i in range(len(methods))]
+    abbrs = [abbreviate_method(m) for m in methods]
     
     # 设置中文字体（优先使用系统自带字体）
     plt.rcParams['font.family'] = ['SimHei', 'Microsoft YaHei', 'sans-serif']
@@ -56,7 +70,7 @@ def plot_3d_bar(dataset_name, data, output_path):
     fig = plt.figure(figsize=(12, 9))
     ax = fig.add_subplot(111, projection='3d')
     
-    xpos = np.arange(len(method_labels))
+    xpos = np.arange(len(methods))
     ypos = np.arange(len(metrics))
     xpos, ypos = np.meshgrid(xpos, ypos, indexing="ij")
     xpos = xpos.ravel()
@@ -70,15 +84,20 @@ def plot_3d_bar(dataset_name, data, output_path):
     # 使用更美观的渐变色
     colors = plt.cm.plasma(np.linspace(0.2, 0.8, len(xpos)))
     ax.bar3d(xpos, ypos, zpos, dx, dy, dz, color=colors, alpha=0.9, edgecolor='black', linewidth=0.5)
+    for i in range(len(methods)):
+        for j in range(len(metrics)):
+            val = values[i, j]
+            ax.text(i + dx/2, j + dy/2, val + 0.3, f"{val:.2f}", fontsize=8,
+                    ha='center', va='bottom', color='black')
     
     # 设置轴标签字体（不使用顶部标题）
-    ax.set_xlabel('方法', fontsize=14, fontweight='bold', labelpad=15)
-    ax.set_ylabel('指标', fontsize=14, fontweight='bold', labelpad=15)
+    ax.set_xlabel('', fontsize=14, fontweight='bold', labelpad=15)
+    ax.set_ylabel('', fontsize=14, fontweight='bold', labelpad=15)
     ax.set_zlabel('分数', fontsize=14, fontweight='bold', labelpad=15)
     
     # 设置刻度标签
-    ax.set_xticks(np.arange(len(method_labels)))
-    ax.set_xticklabels(method_labels, fontsize=12, fontweight='bold')
+    ax.set_xticks(np.arange(len(methods)))
+    ax.set_xticklabels(abbrs, fontsize=12, fontweight='bold')
     
     ax.set_yticks(np.arange(len(metrics)))
     ax.set_yticklabels(metrics, fontsize=12, fontweight='bold')
@@ -92,22 +111,7 @@ def plot_3d_bar(dataset_name, data, output_path):
     # 设置视角
     ax.view_init(elev=25, azim=45)
     
-    # 创建图例
-    legend_elements = [plt.Rectangle((0, 0), 1, 1, facecolor=plt.cm.plasma(i/len(methods)), 
-                                      edgecolor='black', linewidth=0.5, 
-                                      label=f'{label}: {method}') 
-                       for i, (label, method) in enumerate(zip(method_labels, methods))]
-    
-    # 调整图例位置和样式
-    legend = ax.legend(handles=legend_elements, title="方法", 
-                      bbox_to_anchor=(1.15, 0.9), loc='upper left',
-                      fontsize=11, title_fontsize=12, 
-                      frameon=True, fancybox=True, shadow=True,
-                      borderaxespad=0.5)
-    
-    # 设置图例背景色
-    legend.get_frame().set_facecolor('white')
-    legend.get_frame().set_alpha(0.9)
+    # 无图例，直接在 X 轴写缩写
     
     # 调整布局
     plt.subplots_adjust(right=0.8, top=0.9, bottom=0.1)
